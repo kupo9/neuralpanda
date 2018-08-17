@@ -1,0 +1,149 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Nov 14 14:19:47 2015
+
+@author: Pomesh
+
+NL_Event manager for events from the Event.nev file
+Takes event file as well as csc timestamps to give the event times in csc.
+Only to be used after NL_Data has been initialised!
+
+TODO: add ability to input time diff of stims. Also add custom stim time intervals
+1600 for 800 pulses is defualt for now.
+
+Nov15: Can extract the time stamps of the various stimulation events. Add more checks
+to the times.
+
+REMEBER THAT NP RETURNS TUPLE, NEED TO INDEX AT [0]!
+"""
+
+import numpy as np
+import scipy.interpolate as spi
+
+
+import nlxio as nl
+
+class NL_Event():
+    
+    def __init__(self, nlData, eventFile = "Events.nev"):
+        #self._eventFile = eventFile
+        self.eventTs, self.eventId, self.nttl, self.eventString = nl.loadNev(eventFile)
+        self.eventTs = self.eventTs
+        #self.cscTimeStamps = nldata.mmapData['ts']
+        self.nldata = nlData
+        
+        self._stimEventsTotal = len(self.nttl)
+        self._stimEventsNotZero = len(np.where(self.nttl != 0))
+        self._stimSegments = self._getAllStimSegments()
+        self.nStimSegments = len(self._stimSegments) - 1 #added start and end times
+        
+        print (np.unique(self.nttl))
+        print("NL_Event creating interpolator...")
+        #create the interpolator function, this is done once for the instance
+        self._g = spi.interp1d(self.nldata.f['ts'], range(0,len(self.nldata.f['ts'])), kind='nearest', copy = False)
+        #self._g = spi.UnivariateSpline(self.nldata.f['ts'], range(0,len(self.nldata.f['ts'])))                            
+        print "NL_Event initialised..."
+        self._printInfo()
+    
+    def getStimChannelIndex(self, channel, segment):
+        
+#        if channel > 8:
+#            print "ERROR: Max channels stimulated is: 8"
+#            return
+#            
+        sx, sy = self.getStimSegmentIndexAuto(segment) #use these to splice
+        _ttlInSeg = np.where(self.nttl == channel)[0]
+        _chnlStimAt = _ttlInSeg[(_ttlInSeg > sx)*(_ttlInSeg < sy)]
+        
+        return _chnlStimAt
+ 
+ 
+    def getStimChannelCSCIndex(self, channel, segment):
+        """returns the INDEX of the time stamps in csc"""
+        tmp = (self.getStimChannelIndex(channel, segment))
+        return np.array(self._g(self.eventTs[tmp])).astype(int)
+         
+#    #this is the function that'll give the segment time indices. Use these to splice.
+#    def getStimSegmentIndex(self, segment):
+#        """ returns the start and stop index of the segment in the eventTs array"""        
+#        
+#        #this 1600 is hardcoded as the events in 800 pulse paradigms we've been 
+#        #using for the initial experiments. Can change later if needed.
+#        if segment > len(self._stimSegments):
+#            print "Not that many segments. Max is: " + str(len(self._stimSegments) - 1)
+#            print "\n---RESTART PROGRAM---\n"            
+#            return
+#        
+#        #check these values again, 1600
+#        _start = (segment * 1600) - 1600 + 1 
+#        _stop = _start + 1600 
+#        
+#        #returns the start stop index of the segments. Use these and find raw time
+#        #values in other files/functions, when needed.
+#        return _start, _stop
+#    
+    #better function, use this instead of getStimSegmentIndex, directly looks into events and extracts 
+    #instead of hardcoded 1600 values.
+    def getStimSegmentIndexAuto(self, segment):
+        allStimSeg = np.array(self._getAllStimSegments()[0])
+        #np.insert(allStimSeg, 0, allStimSeg[0])
+       # np.append(allStimSeg, self.eventTs[-1])
+        _a = np.add(allStimSeg[:self.nStimSegments],1)
+        _b = np.add(allStimSeg[1:],0) #LOOK INTO THIS, THE STOP VALUE
+        _s = np.vstack((_a,_b))
+        #this returns an (2, ) array with start, stop of the stimsegment     
+        return _s[:,segment]
+        
+    def getStimSegmentCSCIndex(self, segment):
+        #returns the segment indices interpolated to cscTimeStamps
+        _start, _stop = self.getStimSegmentIndexAuto(segment)
+        
+        #self._g is converting to csc time array.
+        _cscStartIndex = int(self._g(self.eventTs[_start]))
+        _cscStopIndex = int(self._g(self.eventTs[_stop]))
+        
+        return _cscStartIndex, _cscStopIndex
+        
+    def _getStimSegmentTime(self, segment):
+        """ returns the timestamps of the events in the segment in csc ts"""
+        _start, _stop = self.getStimSegmentIndex(segment)
+
+        #splicing
+        return self.nldata.f['ts'][_start:_stop]
+        
+    """******************** DANGER: BAD FUNCTION AHEAD*************************"""
+    #this function is unoptimised (and unecessary?), don't use for large tsArray.
+    #need to use numpy array     
+    def _getEventTimes(self, tsArray):
+        """Returns event times in csc for the tsArray's given"""
+        
+        for i in range(1, len(tsArray)):
+            arrayOfClosestIndex = []
+            arrayOfClosestIndex.append(int(self._g(tsArray[i])))
+            
+        return self.nldata.f['ts'][arrayOfClosestIndex]
+        #these should be the event times of the stimulation events
+        #clear array at end for new run. better way to do this?
+    """**********************************************************************"""
+    
+    def _getAllStimSegments(self):
+        #this should return the index where difference is more than 5 minutes 
+        #value now is 25 seconds for testing purposes        
+        ediff = np.diff(self.eventTs)
+        arr = np.where(ediff > 25000000)
+        arr = np.insert(arr, 0, 0)
+        arr = np.append(arr, len(self.eventTs))
+
+#        return np.where(ediff > 25000000)
+        return arr
+
+    def _printInfo(self):
+        print(str(self.nStimSegments) + " stimulation segments found." )
+  
+    
+    
+    
+    
+    
+    
+    

@@ -1,0 +1,2 @@
+folder name: C:\Users\Pomesh\Desktop\CSC
+csc channels: 10
